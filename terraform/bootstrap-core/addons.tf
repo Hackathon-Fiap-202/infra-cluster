@@ -32,7 +32,7 @@ resource "helm_release" "argocd" {
   })]
 
   depends_on = [
-    data.aws_eks_cluster.this
+    data.terraform_remote_state.cluster
   ]
 }
 
@@ -47,7 +47,7 @@ resource "helm_release" "aws_lb_controller" {
   version    = "1.7.2"
 
   values = [yamlencode({
-    clusterName = var.cluster_name
+    clusterName = data.terraform_remote_state.cluster.outputs.cluster_name
     region      = "us-east-1"
     vpcId       = data.terraform_remote_state.infra_core.outputs.vpc_id
 
@@ -125,6 +125,7 @@ resource "helm_release" "external_secrets" {
   timeout = 600
 
   depends_on = [
+    data.terraform_remote_state.cluster,
     aws_iam_role.external_secrets,
     helm_release.aws_lb_controller
   ]
@@ -179,6 +180,7 @@ resource "helm_release" "ebs_csi" {
   timeout = 600
 
   depends_on = [
+    data.terraform_remote_state.cluster,
     aws_iam_role.ebs_csi
   ]
 }
@@ -212,6 +214,6 @@ resource "helm_release" "metrics_server" {
   timeout = 300
 
   depends_on = [
-    data.aws_eks_cluster.this
+    data.terraform_remote_state.cluster
   ]
 }

@@ -9,12 +9,12 @@ resource "aws_iam_role" "external_secrets" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        Federated = data.aws_iam_openid_connect_provider.this.arn
+        Federated = data.terraform_remote_state.cluster.outputs.cluster_oidc_provider_arn
       }
       Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
-          "${replace(data.aws_iam_openid_connect_provider.this.url, "https://", "")}:sub" = "system:serviceaccount:external-secrets:external-secrets-sa"
+          "${replace(data.terraform_remote_state.cluster.outputs.cluster_oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:external-secrets:external-secrets-sa"
         }
       }
     }]
@@ -54,12 +54,12 @@ resource "aws_iam_role" "aws_lb_controller" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        Federated = data.aws_iam_openid_connect_provider.this.arn
+        Federated = data.terraform_remote_state.cluster.outputs.cluster_oidc_provider_arn
       }
       Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
-          "${replace(data.aws_iam_openid_connect_provider.this.url, "https://", "")}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
+          "${replace(data.terraform_remote_state.cluster.outputs.cluster_oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
         }
       }
     }]
@@ -195,7 +195,7 @@ resource "aws_iam_policy" "aws_lb_controller" {
         Resource = "*"
         Condition = {
           StringEquals = {
-            "ec2:ResourceTag/elbv2.k8s.aws/cluster" = var.cluster_name
+            "ec2:ResourceTag/elbv2.k8s.aws/cluster" = data.terraform_remote_state.cluster.outputs.cluster_name
           }
         }
       },
@@ -318,12 +318,12 @@ resource "aws_iam_role" "ebs_csi" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        Federated = data.aws_iam_openid_connect_provider.this.arn
+        Federated = data.terraform_remote_state.cluster.outputs.cluster_oidc_provider_arn
       }
       Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
-          "${replace(data.aws_iam_openid_connect_provider.this.url, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+          "${replace(data.terraform_remote_state.cluster.outputs.cluster_oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
         }
       }
     }]

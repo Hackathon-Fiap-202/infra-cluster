@@ -30,7 +30,7 @@ resource "kubernetes_manifest" "aws_ssm_cluster_secretstore" {
   }
 
   depends_on = [
-    data.aws_eks_cluster.this
+    data.terraform_remote_state.bootstrap_core
   ]
 }
 
@@ -105,7 +105,7 @@ resource "kubernetes_manifest" "limit_range" {
   }
 
   depends_on = [
-    data.aws_eks_cluster.this
+    data.terraform_remote_state.cluster
   ]
 }
 
@@ -131,6 +131,6 @@ resource "kubernetes_manifest" "resource_quota" {
   }
 
   depends_on = [
-    data.aws_eks_cluster.this
+    data.terraform_remote_state.cluster
   ]
 }

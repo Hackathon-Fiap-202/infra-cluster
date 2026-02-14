@@ -19,7 +19,7 @@ resource "helm_release" "datadog" {
 
   set {
     name  = "datadog.clusterName"
-    value = var.cluster_name
+    value = data.terraform_remote_state.cluster.outputs.cluster_name
   }
 
   set {
