@@ -1,4 +1,4 @@
-name: Deploy Infra AWS (EKS + Bootstrap)
+name: Deploy Infra AWS (Unified)
 
 on:
   push:
@@ -12,16 +12,12 @@ permissions:
 env:
   AWS_REGION: us-east-1
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  CLUSTER_NAME: nextime-cluster
+  CLUSTER_NAME: nextime-frame-cluster
 
 jobs:
-  deploy-cluster:
-    name: Deploy EKS Cluster
+  deploy-infra:
+    name: Deploy Infraestrutura Completa
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: terraform/cluster
 
     steps:
       - uses: actions/checkout@v4
@@ -36,8 +32,8 @@ jobs:
         with:
           path: |
             ~/.terraform.d/plugin-cache
-            infra/.terraform
-          key: ${{ runner.os }}-terraform-${{ hashFiles('infra/**/*.tf*') }}
+            .terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
           restore-keys: |
             ${{ runner.os }}-terraform-
 
@@ -47,8 +43,8 @@ jobs:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform Format
-        run: terraform fmt -check -diff || true
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive || true
 
       - name: Terraform Init
         run: terraform init
@@ -56,111 +52,32 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
-      - name: Terraform Plan - Cluster
-        run: terraform plan -var-file=terraform.tfvars
+      - name: Terraform Plan
+        run: terraform plan -var-file=terraform.tfvars -out=tfplan
 
-      - name: Terraform Apply - Cluster
-        run: terraform apply -auto-approve -var-file=terraform.tfvars
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
 
-
-  deploy-bootstrap-core:
-    name: Deploy Bootstrap Core (CRDs, IRSA, Controllers)
-    runs-on: ubuntu-latest
-    needs: deploy-cluster
-
-    defaults:
-      run:
-        working-directory: terraform/bootstrap-core
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
-
-      - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-
-      - name: Configure kubeconfig
+      - name: Configure kubectl
         run: |
           aws eks update-kubeconfig \
-            --name $CLUSTER_NAME \
-            --region $AWS_REGION
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
 
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan - Bootstrap Core
-        run: terraform plan -var-file=terraform.tfvars
-
-      - name: Terraform Apply - Bootstrap Core
-        run: terraform apply -auto-approve -var-file=terraform.tfvars
-
-
-  deploy-bootstrap-addons:
-    name: Deploy Bootstrap Addons (Secrets, Datadog)
-    runs-on: ubuntu-latest
-    needs: deploy-bootstrap-core
-
-    defaults:
-      run:
-        working-directory: terraform/bootstrap-addons
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
-
-      - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-
-      - name: Configure kubeconfig
+      - name: Verify Cluster
         run: |
-          aws eks update-kubeconfig \
-            --name $CLUSTER_NAME \
-            --region $AWS_REGION
+          echo "✅ Verificando o cluster..."
+          kubectl get nodes
+          kubectl get pods -A
 
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan - Bootstrap Addons
-        run: terraform plan -var-file=terraform.tfvars
-
-      - name: Wait for External Secrets CRDs
+      - name: Deployment Summary
         run: |
-          echo "Waiting for External Secrets CRDs to be available..."
-          for i in {1..30}; do
-            if kubectl get crd secretstores.external-secrets.io >/dev/null 2>&1 && \
-               kubectl get crd externalsecrets.external-secrets.io >/dev/null 2>&1; then
-              echo "External Secrets CRDs are available!"
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Terraform Apply - Bootstrap Addons
-        run: terraform apply -auto-approve -var-file=terraform.tfvars
+          echo "🎉 Deploy concluído com sucesso!"
+          echo ""
+          echo "📦 Módulos implantados:"
+          echo "  ✅ module.cluster - EKS Cluster"
+          echo "  ✅ module.bootstrap_core - IRSA + Addons Core"
+          echo "  ✅ module.bootstrap_addons - Datadog + Secrets"
+          echo ""
+          echo "🔗 Cluster: ${{ env.CLUSTER_NAME }}"
+          echo "🌍 Região: ${{ env.AWS_REGION }}"

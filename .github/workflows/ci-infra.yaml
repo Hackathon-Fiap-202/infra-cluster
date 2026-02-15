@@ -1,4 +1,4 @@
-name: Terraform Plan (EKS + Bootstrap)
+name: Terraform Plan (Infra Unificada)
 
 on:
   pull_request:
@@ -17,16 +17,11 @@ permissions:
 env:
   AWS_REGION: us-east-1
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  CLUSTER_NAME: nextime-cluster
 
 jobs:
-  plan-cluster:
-    name: Terraform Plan - EKS Cluster
+  plan-infra:
+    name: Terraform Plan - Infraestrutura Completa
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: terraform/cluster
 
     steps:
       - uses: actions/checkout@v4
@@ -45,74 +40,19 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan - Cluster
-        run: terraform plan -var-file=terraform.tfvars
-
-
-  plan-bootstrap-core:
-    name: Terraform Plan - Bootstrap Core
-    runs-on: ubuntu-latest
-    needs: plan-cluster
-
-    defaults:
-      run:
-        working-directory: terraform/bootstrap-core
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Terraform Init
-        run: terraform init
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive || true
 
       - name: Terraform Validate
         run: terraform validate
 
-      - name: Terraform Plan - Bootstrap Core
+      - name: Terraform Plan
         run: terraform plan -var-file=terraform.tfvars
 
-
-  plan-bootstrap-addons:
-    name: Terraform Plan - Bootstrap Addons
-    runs-on: ubuntu-latest
-    needs: plan-bootstrap-core
-
-    defaults:
-      run:
-        working-directory: terraform/bootstrap-addons
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan - Bootstrap Addons
-        run: terraform plan -var-file=terraform.tfvars
+      - name: Plan Summary
+        run: |
+          echo "✅ Plan executado com sucesso!"
+          echo "📦 Módulos incluídos:"
+          echo "  - module.cluster (EKS)"
+          echo "  - module.bootstrap_core (IRSA + Addons Core)"
+          echo "  - module.bootstrap_addons (Datadog + Secrets)"
