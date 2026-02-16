@@ -57,6 +57,12 @@ module "bootstrap_core" {
   
   # Passa dados do infra-core
   vpc_id = local.vpc_id
+
+  providers = {
+    kubernetes = kubernetes
+    helm       = helm
+    aws        = aws
+  }
 }
 
 # --------------------------------------------------
