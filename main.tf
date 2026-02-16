@@ -74,4 +74,3 @@ module "bootstrap_addons" {
   # Passa outputs do cluster
   cluster_name = module.cluster.cluster_name
 }
-

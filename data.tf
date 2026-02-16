@@ -15,4 +15,3 @@ data "aws_eks_cluster_auth" "this" {
 
 # Caller identity para uso nos módulos
 data "aws_caller_identity" "current" {}
-

@@ -31,9 +31,7 @@ resource "helm_release" "argocd" {
     }
   })]
 
-  depends_on = [
-    data.terraform_remote_state.cluster
-  ]
+  # Dependências gerenciadas pelo root module
 }
 
 # ----------------------
