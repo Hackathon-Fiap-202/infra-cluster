@@ -8,9 +8,18 @@ data "terraform_remote_state" "infra_core" {
   }
 }
 
-# Auth token para Kubernetes
+# Data sources do cluster EKS (lidos após cluster ser criado)
+# Estes data sources são usados pelos providers kubernetes e helm
+data "aws_eks_cluster" "this" {
+  name = module.cluster.cluster_name
+  
+  depends_on = [module.cluster]
+}
+
 data "aws_eks_cluster_auth" "this" {
   name = module.cluster.cluster_name
+  
+  depends_on = [module.cluster]
 }
 
 # Caller identity para uso nos módulos

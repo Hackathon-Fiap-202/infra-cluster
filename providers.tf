@@ -25,18 +25,19 @@ provider "aws" {
   }
 }
 
-# Provider Kubernetes configurado após criação do cluster
+# Provider Kubernetes configurado usando data sources
+# Os data sources garantem que o cluster existe antes de tentar conectar
 provider "kubernetes" {
-  host                   = module.cluster.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.cluster.cluster_ca)
+  host                   = data.aws_eks_cluster.this.endpoint
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
   token                  = data.aws_eks_cluster_auth.this.token
 }
 
-# Provider Helm configurado após criação do cluster
+# Provider Helm configurado usando data sources
 provider "helm" {
   kubernetes {
-    host                   = module.cluster.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.cluster.cluster_ca)
+    host                   = data.aws_eks_cluster.this.endpoint
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
     token                  = data.aws_eks_cluster_auth.this.token
   }
 }
