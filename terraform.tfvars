@@ -39,6 +39,13 @@ public_access_cidrs     = ["0.0.0.0/0"]
 ami_type = "AL2_x86_64"
 
 # -----------------------------------------------------------------------------
+# Controle de Bootstrap
+# -----------------------------------------------------------------------------
+# IMPORTANTE: Deixe false no primeiro apply para criar apenas o cluster
+# Após cluster criado, altere para true e rode apply novamente
+enable_bootstrap_addons = false
+
+# -----------------------------------------------------------------------------
 # Tags
 # -----------------------------------------------------------------------------
 tags = {

@@ -100,6 +100,15 @@ variable "public_access_cidrs" {
 }
 
 # -----------------------------------------------------------------------------
+# Controle de Bootstrap
+# -----------------------------------------------------------------------------
+variable "enable_bootstrap_addons" {
+  description = "Habilita criação dos módulos bootstrap (bootstrap-core e bootstrap-addons). Deve ser false no primeiro apply."
+  type        = bool
+  default     = false
+}
+
+# -----------------------------------------------------------------------------
 # Tags
 # -----------------------------------------------------------------------------
 variable "tags" {

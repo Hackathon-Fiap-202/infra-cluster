@@ -46,8 +46,10 @@ module "cluster" {
 # -----------------------------------------------------------------------------
 # MÓDULO 2: Bootstrap Core (IRSA + Addons Essenciais)
 # -----------------------------------------------------------------------------
+# CONDICIONAL: Só é criado quando enable_bootstrap_addons = true
 module "bootstrap_core" {
   source = "./modules/bootstrap-core"
+  count  = var.enable_bootstrap_addons ? 1 : 0
 
   # Dependência explícita: aguarda cluster ser criado
   depends_on = [module.cluster]
@@ -71,8 +73,10 @@ module "bootstrap_core" {
 # -----------------------------------------------------------------------------
 # MÓDULO 3: Bootstrap Addons (Datadog, Secrets, etc)
 # -----------------------------------------------------------------------------
+# CONDICIONAL: Só é criado quando enable_bootstrap_addons = true
 module "bootstrap_addons" {
   source = "./modules/bootstrap-addons"
+  count  = var.enable_bootstrap_addons ? 1 : 0
 
   # Dependência explícita: aguarda bootstrap_core ser criado
   depends_on = [module.bootstrap_core]

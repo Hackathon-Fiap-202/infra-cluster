@@ -21,8 +21,8 @@ env:
   CLUSTER_NAME: nextime-frame-cluster
 
 jobs:
-  terraform-plan:
-    name: Plan - Infraestrutura Completa
+  terraform-plan-base:
+    name: Plan - Fase 1 (Cluster)
     runs-on: ubuntu-latest
 
     steps:
@@ -41,99 +41,76 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Format Check
-        id: fmt
         run: terraform fmt -check -recursive
         continue-on-error: true
 
       - name: Terraform Init
-        id: init
         run: terraform init -upgrade
 
       - name: Terraform Validate
-        id: validate
         run: terraform validate
 
-      - name: Check if EKS Cluster Exists
-        id: check_cluster
+      - name: Terraform Plan - Fase 1 (Cluster apenas)
         run: |
-          if aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION > /dev/null 2>&1; then
-            echo "cluster_exists=true" >> $GITHUB_OUTPUT
-            echo "Cluster already exists."
-          else
-            echo "cluster_exists=false" >> $GITHUB_OUTPUT
-            echo "Cluster does not exist yet."
-          fi
+          terraform plan \
+            -var-file=terraform.tfvars \
+            -var="enable_bootstrap_addons=false" \
+            -out=tfplan-fase1
 
-      - name: Terraform Plan (Cluster First if Needed)
-        id: plan
-        run: |
-          if [ "${{ steps.check_cluster.outputs.cluster_exists }}" = "false" ]; then
-            echo "Running plan ONLY for module.cluster (first deploy)..."
-            terraform plan \
-              -target=module.cluster \
-              -var-file=terraform.tfvars \
-              -out=tfplan
-          else
-            echo "Running FULL plan..."
-            terraform plan \
-              -var-file=terraform.tfvars \
-              -out=tfplan
-          fi
-        continue-on-error: true
-
-      - name: Comment PR com resultado do Plan
-        uses: actions/github-script@v7
-        if: github.event_name == 'pull_request'
-        env:
-          PLAN: ${{ steps.plan.outputs.stdout }}
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
-            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-
-            <details><summary>Show Plan</summary>
-
-            \`\`\`terraform
-            ${process.env.PLAN}
-            \`\`\`
-
-            </details>
-
-            **Cluster Exists**: ${{ steps.check_cluster.outputs.cluster_exists }}
-            **Pusher**: @${{ github.actor }}
-            **Action**: ${{ github.event_name }}
-            **Working Directory**: \`./\` (Root Module)`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
-
-      - name: Terraform Plan Status
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
-
-      - name: Upload Plan
+      - name: Upload Plan Fase 1
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan
-          path: tfplan
+          name: tfplan-fase1
+          path: tfplan-fase1
+          retention-days: 5
+
+  terraform-plan-bootstrap:
+    name: Plan - Fase 2 (Bootstrap)
+    runs-on: ubuntu-latest
+    needs: terraform-plan-base
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init -upgrade
+
+      - name: Terraform Plan - Fase 2 (Com Bootstrap)
+        run: |
+          terraform plan \
+            -var-file=terraform.tfvars \
+            -var="enable_bootstrap_addons=true" \
+            -out=tfplan-fase2
+        continue-on-error: true
+
+      - name: Upload Plan Fase 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-fase2
+          path: tfplan-fase2
           retention-days: 5
 
       - name: Plan Summary
         run: |
           echo "## 📊 Plan Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Terraform Format**: ${{ steps.fmt.outcome }}" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Terraform Init**: ${{ steps.init.outcome }}" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Terraform Validate**: ${{ steps.validate.outcome }}" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Terraform Plan**: ${{ steps.plan.outcome }}" >> $GITHUB_STEP_SUMMARY
-          echo "🔎 **Cluster Exists**: ${{ steps.check_cluster.outputs.cluster_exists }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Fase 1 - Cluster" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Plan concluído (cluster apenas)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Fase 2 - Bootstrap" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Plan concluído (com bootstrap addons)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📦 **Módulos incluídos**:" >> $GITHUB_STEP_SUMMARY
           echo "- module.cluster (EKS Cluster)" >> $GITHUB_STEP_SUMMARY

@@ -38,34 +38,16 @@ provider "aws" {
 # -----------------------------------------------------------------------------
 # Provider Kubernetes
 # -----------------------------------------------------------------------------
+# CONDICIONAL: Só conecta ao cluster quando enable_bootstrap_addons = true
+# Quando false, usa valores dummy para evitar erro de REST client
 provider "kubernetes" {
-  host                   = module.cluster.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.cluster.cluster_ca)
+  host                   = var.enable_bootstrap_addons ? module.cluster.cluster_endpoint : "https://localhost"
+  cluster_ca_certificate = var.enable_bootstrap_addons ? base64decode(module.cluster.cluster_ca) : null
   
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args = [
-      "eks",
-      "get-token",
-      "--cluster-name",
-      module.cluster.cluster_name,
-      "--region",
-      var.region
-    ]
-  }
-}
-
-# -----------------------------------------------------------------------------
-# Provider Helm
-# -----------------------------------------------------------------------------
-# Conecta ao cluster EKS usando outputs do módulo cluster
-provider "helm" {
-  kubernetes {
-    host                   = module.cluster.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.cluster.cluster_ca)
-    
-    exec {
+  # Exec só é usado quando bootstrap está habilitado
+  dynamic "exec" {
+    for_each = var.enable_bootstrap_addons ? [1] : []
+    content {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
       args = [
@@ -76,6 +58,35 @@ provider "helm" {
         "--region",
         var.region
       ]
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Provider Helm
+# -----------------------------------------------------------------------------
+# CONDICIONAL: Só conecta ao cluster quando enable_bootstrap_addons = true
+# Quando false, usa valores dummy para evitar erro de REST client
+provider "helm" {
+  kubernetes {
+    host                   = var.enable_bootstrap_addons ? module.cluster.cluster_endpoint : "https://localhost"
+    cluster_ca_certificate = var.enable_bootstrap_addons ? base64decode(module.cluster.cluster_ca) : null
+    
+    # Exec só é usado quando bootstrap está habilitado
+    dynamic "exec" {
+      for_each = var.enable_bootstrap_addons ? [1] : []
+      content {
+        api_version = "client.authentication.k8s.io/v1beta1"
+        command     = "aws"
+        args = [
+          "eks",
+          "get-token",
+          "--cluster-name",
+          module.cluster.cluster_name,
+          "--region",
+          var.region
+        ]
+      }
     }
   }
 }

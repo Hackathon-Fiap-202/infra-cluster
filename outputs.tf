@@ -37,18 +37,19 @@ output "public_subnet_ids" {
 # -----------------------------------------------------------------------------
 # Outputs do Bootstrap Core
 # -----------------------------------------------------------------------------
+# CONDICIONAL: Só expõe outputs quando bootstrap está habilitado
 output "aws_lb_controller_role_arn" {
   description = "ARN da role IAM do AWS Load Balancer Controller"
-  value       = module.bootstrap_core.aws_lb_controller_role_arn
+  value       = var.enable_bootstrap_addons ? module.bootstrap_core[0].aws_lb_controller_role_arn : null
 }
 
 output "external_secrets_role_arn" {
   description = "ARN da role IAM do External Secrets"
-  value       = module.bootstrap_core.external_secrets_role_arn
+  value       = var.enable_bootstrap_addons ? module.bootstrap_core[0].external_secrets_role_arn : null
 }
 
 output "ebs_csi_role_arn" {
   description = "ARN da role IAM do EBS CSI Driver"
-  value       = module.bootstrap_core.ebs_csi_role_arn
+  value       = var.enable_bootstrap_addons ? module.bootstrap_core[0].ebs_csi_role_arn : null
 }
 
