@@ -51,11 +51,34 @@ jobs:
 
       - name: Terraform Validate
         id: validate
-        run: terraform validate -no-color
+        run: terraform validate
 
-      - name: Terraform Plan
+      - name: Check if EKS Cluster Exists
+        id: check_cluster
+        run: |
+          if aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION > /dev/null 2>&1; then
+            echo "cluster_exists=true" >> $GITHUB_OUTPUT
+            echo "Cluster already exists."
+          else
+            echo "cluster_exists=false" >> $GITHUB_OUTPUT
+            echo "Cluster does not exist yet."
+          fi
+
+      - name: Terraform Plan (Cluster First if Needed)
         id: plan
-        run: terraform plan -var-file=terraform.tfvars -no-color -out=tfplan
+        run: |
+          if [ "${{ steps.check_cluster.outputs.cluster_exists }}" = "false" ]; then
+            echo "Running plan ONLY for module.cluster (first deploy)..."
+            terraform plan \
+              -target=module.cluster \
+              -var-file=terraform.tfvars \
+              -out=tfplan
+          else
+            echo "Running FULL plan..."
+            terraform plan \
+              -var-file=terraform.tfvars \
+              -out=tfplan
+          fi
         continue-on-error: true
 
       - name: Comment PR com resultado do Plan
@@ -79,6 +102,7 @@ jobs:
 
             </details>
 
+            **Cluster Exists**: ${{ steps.check_cluster.outputs.cluster_exists }}
             **Pusher**: @${{ github.actor }}
             **Action**: ${{ github.event_name }}
             **Working Directory**: \`./\` (Root Module)`;
@@ -109,6 +133,7 @@ jobs:
           echo "✅ **Terraform Init**: ${{ steps.init.outcome }}" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Terraform Validate**: ${{ steps.validate.outcome }}" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Terraform Plan**: ${{ steps.plan.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "🔎 **Cluster Exists**: ${{ steps.check_cluster.outputs.cluster_exists }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📦 **Módulos incluídos**:" >> $GITHUB_STEP_SUMMARY
           echo "- module.cluster (EKS Cluster)" >> $GITHUB_STEP_SUMMARY
