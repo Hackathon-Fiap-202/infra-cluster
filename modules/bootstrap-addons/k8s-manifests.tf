@@ -29,9 +29,7 @@ resource "kubernetes_manifest" "aws_ssm_cluster_secretstore" {
     }
   }
 
-  depends_on = [
-    data.terraform_remote_state.bootstrap_core
-  ]
+  # Dependência gerenciada pelo root module via depends_on
 }
 
 # -------------------------------------------------
@@ -104,9 +102,7 @@ resource "kubernetes_manifest" "limit_range" {
     }
   }
 
-  depends_on = [
-    data.terraform_remote_state.cluster
-  ]
+  # Dependência gerenciada pelo root module via depends_on
 }
 
 # -------------------------------------------------
@@ -130,7 +126,5 @@ resource "kubernetes_manifest" "resource_quota" {
     }
   }
 
-  depends_on = [
-    data.terraform_remote_state.cluster
-  ]
+  # Dependência gerenciada pelo root module via depends_on
 }

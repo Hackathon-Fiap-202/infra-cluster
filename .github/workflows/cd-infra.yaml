@@ -1,4 +1,4 @@
-name: Deploy Infra AWS (EKS + Bootstrap)
+name: Deploy Infra AWS (Unified Root Module)
 
 on:
   push:
@@ -12,29 +12,35 @@ permissions:
 env:
   AWS_REGION: us-east-1
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  CLUSTER_NAME: nextime-cluster
+  CLUSTER_NAME: nextime-frame-cluster
 
 jobs:
-
-  deploy-cluster:
-    name: Deploy EKS Cluster
+  terraform-apply:
+    name: Deploy - Infraestrutura Completa
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: modules/cluster
+    environment: production  # Proteção adicional para deploy em prod
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout código
+        uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
+          terraform_wrapper: false  # Para obter outputs limpos
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive || true
 
       - name: Terraform Init
         run: terraform init -upgrade
@@ -42,104 +48,102 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
-      - name: Terraform Plan - Cluster
-        run: terraform plan -var-file=terraform.tfvars
+      - name: Terraform Plan
+        run: terraform plan -var-file=terraform.tfvars -out=tfplan
 
-      - name: Terraform Apply - Cluster
-        run: terraform apply -auto-approve -var-file=terraform.tfvars
+      - name: Terraform Apply
+        id: apply
+        run: |
+          terraform apply -auto-approve tfplan
+          echo "apply_success=true" >> $GITHUB_OUTPUT
 
-
-  deploy-bootstrap-core:
-    name: Deploy Bootstrap Core
-    runs-on: ubuntu-latest
-    needs: deploy-cluster
-
-    defaults:
-      run:
-        working-directory: modules/bootstrap-core
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
-          aws-region: ${{ env.AWS_REGION }}
-
-      - uses: azure/setup-kubectl@v3
-
-      - name: Configure kubeconfig
+      - name: Configure kubectl (após cluster ser criado)
+        if: steps.apply.outputs.apply_success == 'true'
         run: |
           aws eks update-kubeconfig \
-            --name $CLUSTER_NAME \
-            --region $AWS_REGION
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
 
-      - name: Terraform Init
-        run: terraform init -upgrade
-
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan - Bootstrap Core
-        run: terraform plan -var-file=terraform.tfvars
-
-      - name: Terraform Apply - Bootstrap Core
-        run: terraform apply -auto-approve -var-file=terraform.tfvars
-
-
-  deploy-bootstrap-addons:
-    name: Deploy Bootstrap Addons
-    runs-on: ubuntu-latest
-    needs: deploy-bootstrap-core
-
-    defaults:
-      run:
-        working-directory: modules/bootstrap-addons
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
-          aws-region: ${{ env.AWS_REGION }}
-
-      - uses: azure/setup-kubectl@v3
-
-      - name: Configure kubeconfig
+      - name: Aguardar cluster ficar pronto
+        if: steps.apply.outputs.apply_success == 'true'
         run: |
-          aws eks update-kubeconfig \
-            --name $CLUSTER_NAME \
-            --region $AWS_REGION
+          echo "Aguardando nodes ficarem prontos..."
+          kubectl wait --for=condition=Ready nodes --all --timeout=600s || true
 
-      - name: Terraform Init
-        run: terraform init -upgrade
-
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan - Bootstrap Addons
-        run: terraform plan -var-file=terraform.tfvars
-
-      - name: Wait for External Secrets CRDs
+      - name: Verificar estado do cluster
+        if: steps.apply.outputs.apply_success == 'true'
         run: |
-          for i in {1..30}; do
-            if kubectl get crd secretstores.external-secrets.io >/dev/null 2>&1 && \
-               kubectl get crd externalsecrets.external-secrets.io >/dev/null 2>&1; then
-              echo "CRDs disponíveis"
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
+          echo "## 🎯 Verificação do Cluster" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Nodes" >> $GITHUB_STEP_SUMMARY
+          kubectl get nodes >> $GITHUB_STEP_SUMMARY || echo "Erro ao obter nodes" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pods (todos os namespaces)" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -A >> $GITHUB_STEP_SUMMARY || echo "Erro ao obter pods" >> $GITHUB_STEP_SUMMARY
 
-      - name: Terraform Apply - Bootstrap Addons
-        run: terraform apply -auto-approve -var-file=terraform.tfvars
+      - name: Verificar Addons Core
+        if: steps.apply.outputs.apply_success == 'true'
+        run: |
+          echo "## 📦 Addons Core" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # ArgoCD
+          echo "### ArgoCD" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n argocd >> $GITHUB_STEP_SUMMARY || echo "ArgoCD não encontrado" >> $GITHUB_STEP_SUMMARY
+          
+          # External Secrets
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### External Secrets" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n external-secrets >> $GITHUB_STEP_SUMMARY || echo "External Secrets não encontrado" >> $GITHUB_STEP_SUMMARY
+          
+          # AWS Load Balancer Controller
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### AWS Load Balancer Controller" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller >> $GITHUB_STEP_SUMMARY || echo "LB Controller não encontrado" >> $GITHUB_STEP_SUMMARY
+
+      - name: Verificar Addons Adicionais
+        if: steps.apply.outputs.apply_success == 'true'
+        run: |
+          echo "## 🔧 Addons Adicionais" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Datadog
+          echo "### Datadog" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n default -l app=datadog >> $GITHUB_STEP_SUMMARY || echo "Datadog não encontrado" >> $GITHUB_STEP_SUMMARY
+          
+          # ClusterSecretStore
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ClusterSecretStore" >> $GITHUB_STEP_SUMMARY
+          kubectl get clustersecretstore >> $GITHUB_STEP_SUMMARY || echo "ClusterSecretStore não encontrado" >> $GITHUB_STEP_SUMMARY
+
+      - name: Obter Terraform Outputs
+        if: steps.apply.outputs.apply_success == 'true'
+        run: |
+          echo "## 📤 Terraform Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          terraform output >> $GITHUB_STEP_SUMMARY || echo "Erro ao obter outputs" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Deploy Summary
+        if: steps.apply.outputs.apply_success == 'true'
+        run: |
+          echo "## 🎉 Deploy Concluído com Sucesso!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Cluster EKS**: ${{ env.CLUSTER_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Região**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Backend State**: s3://nextime-frame-state-bucket/infra-kubernetes/infra.tfstate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 **Módulos implantados**:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ module.cluster - EKS Cluster" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ module.bootstrap_core - IRSA + Addons Core" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ module.bootstrap_addons - Datadog + Secrets" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notificar falha
+        if: failure()
+        run: |
+          echo "## ❌ Deploy Falhou" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Verifique os logs acima para detalhes do erro." >> $GITHUB_STEP_SUMMARY

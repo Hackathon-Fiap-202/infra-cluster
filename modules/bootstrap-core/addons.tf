@@ -1,7 +1,3 @@
-# ==========================================
-# Helm Releases - Addons que criam CRDs
-# ==========================================
-
 # ----------------------
 # ArgoCD
 # ----------------------
@@ -31,9 +27,7 @@ resource "helm_release" "argocd" {
     }
   })]
 
-  depends_on = [
-    data.terraform_remote_state.cluster
-  ]
+  # Dependência gerenciada pelo root module via depends_on
 }
 
 # ----------------------
@@ -47,9 +41,9 @@ resource "helm_release" "aws_lb_controller" {
   version    = "1.7.2"
 
   values = [yamlencode({
-    clusterName = data.terraform_remote_state.cluster.outputs.cluster_name
+    clusterName = var.cluster_name
     region      = "us-east-1"
-    vpcId       = data.terraform_remote_state.infra_core.outputs.vpc_id
+    vpcId       = var.vpc_id
 
     serviceAccount = {
       create = true
@@ -125,7 +119,6 @@ resource "helm_release" "external_secrets" {
   timeout = 600
 
   depends_on = [
-    data.terraform_remote_state.cluster,
     aws_iam_role.external_secrets,
     helm_release.aws_lb_controller
   ]
@@ -180,7 +173,6 @@ resource "helm_release" "ebs_csi" {
   timeout = 600
 
   depends_on = [
-    data.terraform_remote_state.cluster,
     aws_iam_role.ebs_csi
   ]
 }
@@ -213,7 +205,5 @@ resource "helm_release" "metrics_server" {
   wait    = true
   timeout = 300
 
-  depends_on = [
-    data.terraform_remote_state.cluster
-  ]
+  # Dependência gerenciada pelo root module via depends_on
 }

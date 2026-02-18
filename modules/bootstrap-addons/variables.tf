@@ -1,12 +1,20 @@
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  description = "AWS region"
+  type        = string
 }
 
 variable "environment" {
-  type = string
+  description = "Environment name"
+  type        = string
 }
 
 variable "project" {
-  type = string
+  description = "Project name"
+  type        = string
+}
+
+# Output do cluster passado como variável (elimina remote_state)
+variable "cluster_name" {
+  description = "Nome do cluster EKS"
+  type        = string
 }

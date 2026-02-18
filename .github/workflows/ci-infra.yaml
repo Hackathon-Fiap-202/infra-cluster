@@ -1,4 +1,4 @@
-name: Terraform Plan (EKS + Bootstrap)
+name: Terraform Plan (Unified Root Module)
 
 on:
   pull_request:
@@ -13,77 +13,104 @@ on:
 permissions:
   id-token: write
   contents: read
+  pull-requests: write
 
 env:
   AWS_REGION: us-east-1
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  CLUSTER_NAME: nextime-cluster
+  CLUSTER_NAME: nextime-frame-cluster
 
 jobs:
-
-  plan-cluster:
-    name: Plan - EKS Cluster
+  terraform-plan:
+    name: Plan - Infraestrutura Completa
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: modules/cluster
-
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
-      - uses: aws-actions/configure-aws-credentials@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
           aws-region: ${{ env.AWS_REGION }}
-      - run: terraform init -upgrade
-      - run: terraform validate
-      - run: terraform plan -var-file=terraform.tfvars
 
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
 
-  plan-bootstrap-core:
-    name: Plan - Bootstrap Core
-    runs-on: ubuntu-latest
-    needs: plan-cluster
+      - name: Terraform Init
+        id: init
+        run: terraform init -upgrade
 
-    defaults:
-      run:
-        working-directory: modules/bootstrap-core
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
 
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -var-file=terraform.tfvars -no-color -out=tfplan
+        continue-on-error: true
+
+      - name: Comment PR com resultado do Plan
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
         with:
-          terraform_version: 1.6.6
-      - uses: aws-actions/configure-aws-credentials@v4
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            **Pusher**: @${{ github.actor }}
+            **Action**: ${{ github.event_name }}
+            **Working Directory**: \`./\` (Root Module)`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
         with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
-          aws-region: ${{ env.AWS_REGION }}
-      - run: terraform init -upgrade
-      - run: terraform validate
-      - run: terraform plan -var-file=terraform.tfvars
+          name: tfplan
+          path: tfplan
+          retention-days: 5
 
-
-  plan-bootstrap-addons:
-    name: Plan - Bootstrap Addons
-    runs-on: ubuntu-latest
-    needs: plan-bootstrap-core
-
-    defaults:
-      run:
-        working-directory: modules/bootstrap-addons
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.6
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
-          aws-region: ${{ env.AWS_REGION }}
-      - run: terraform init -upgrade
-      - run: terraform validate
-      - run: terraform plan -var-file=terraform.tfvars
+      - name: Plan Summary
+        run: |
+          echo "## 📊 Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Terraform Format**: ${{ steps.fmt.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Terraform Init**: ${{ steps.init.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Terraform Validate**: ${{ steps.validate.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Terraform Plan**: ${{ steps.plan.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 **Módulos incluídos**:" >> $GITHUB_STEP_SUMMARY
+          echo "- module.cluster (EKS Cluster)" >> $GITHUB_STEP_SUMMARY
+          echo "- module.bootstrap_core (IRSA + Addons Core)" >> $GITHUB_STEP_SUMMARY
+          echo "- module.bootstrap_addons (Datadog + Configs)" >> $GITHUB_STEP_SUMMARY

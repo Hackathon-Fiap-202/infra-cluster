@@ -1,11 +1,15 @@
 variable "region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-1"
 }
 
 variable "environment" {
   description = "Environment name (dev, staging, prod)"
+  type        = string
+}
+
+variable "project" {
+  description = "Project name"
   type        = string
 }
 
@@ -17,6 +21,17 @@ variable "cluster_name" {
 variable "cluster_version" {
   description = "EKS Kubernetes version"
   type        = string
+}
+
+# Rede - recebe do infra-core via root module
+variable "vpc_id" {
+  description = "VPC ID do infra-core"
+  type        = string
+}
+
+variable "public_subnet_ids" {
+  description = "IDs das subnets públicas do infra-core"
+  type        = list(string)
 }
 
 variable "ami_type" {
@@ -44,15 +59,18 @@ variable "public_access_cidrs" {
 }
 
 variable "node_min_size" {
-  type = number
+  description = "Minimum number of nodes"
+  type        = number
 }
 
 variable "node_max_size" {
-  type = number
+  description = "Maximum number of nodes"
+  type        = number
 }
 
 variable "node_desired_size" {
-  type = number
+  description = "Desired number of nodes"
+  type        = number
 }
 
 variable "node_instance_types" {
