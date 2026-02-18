@@ -10,9 +10,3 @@ variable "environment" {
 variable "project" {
   type = string
 }
-
-# Recebe output do módulo cluster
-variable "cluster_name" {
-  description = "Nome do cluster EKS"
-  type        = string
-}

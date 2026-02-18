@@ -65,14 +65,3 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
-
-# Recebe do root module (infra-core)
-variable "vpc_id" {
-  description = "VPC ID do infra-core"
-  type        = string
-}
-
-variable "public_subnet_ids" {
-  description = "Public subnet IDs do infra-core"
-  type        = list(string)
-}

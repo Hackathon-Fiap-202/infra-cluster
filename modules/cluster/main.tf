@@ -1,5 +1,5 @@
 locals {
-  subnet_ids = var.public_subnet_ids
+  subnet_ids = data.terraform_remote_state.network.outputs.public_subnet_ids
 }
 
 module "eks" {
@@ -33,7 +33,7 @@ module "eks" {
 resource "aws_security_group" "eks_cluster_sg" {
   name        = "${var.cluster_name}-cluster-sg"
   description = "EKS Cluster Security Group"
-  vpc_id      = var.vpc_id
+  vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
 
   ingress {
     description     = "Allow nodes to communicate with cluster API"
@@ -61,7 +61,7 @@ resource "aws_security_group" "eks_cluster_sg" {
 resource "aws_security_group" "eks_nodes_sg" {
   name        = "${var.cluster_name}-nodes-sg"
   description = "EKS Worker Nodes Security Group"
-  vpc_id      = var.vpc_id
+  vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
 
   ingress {
     description = "Node to node communication"

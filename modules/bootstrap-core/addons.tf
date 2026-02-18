@@ -31,7 +31,9 @@ resource "helm_release" "argocd" {
     }
   })]
 
-  # Dependências gerenciadas pelo root module
+  depends_on = [
+    data.terraform_remote_state.cluster
+  ]
 }
 
 # ----------------------
@@ -45,9 +47,9 @@ resource "helm_release" "aws_lb_controller" {
   version    = "1.7.2"
 
   values = [yamlencode({
-    clusterName = var.cluster_name
+    clusterName = data.terraform_remote_state.cluster.outputs.cluster_name
     region      = "us-east-1"
-    vpcId       = var.vpc_id
+    vpcId       = data.terraform_remote_state.infra_core.outputs.vpc_id
 
     serviceAccount = {
       create = true
@@ -123,6 +125,7 @@ resource "helm_release" "external_secrets" {
   timeout = 600
 
   depends_on = [
+    data.terraform_remote_state.cluster,
     aws_iam_role.external_secrets,
     helm_release.aws_lb_controller
   ]
@@ -177,6 +180,7 @@ resource "helm_release" "ebs_csi" {
   timeout = 600
 
   depends_on = [
+    data.terraform_remote_state.cluster,
     aws_iam_role.ebs_csi
   ]
 }
@@ -209,5 +213,7 @@ resource "helm_release" "metrics_server" {
   wait    = true
   timeout = 300
 
-  # Dependências gerenciadas pelo root module
+  depends_on = [
+    data.terraform_remote_state.cluster
+  ]
 }

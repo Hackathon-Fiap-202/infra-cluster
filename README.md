@@ -1,6 +1,6 @@
 # Infra-Cluster
 
-Repositório contendo a infraestrutura do cluster Kubernetes (EKS) na AWS, gerenciada com Terraform em arquitetura modular.
+Repositório contendo a infraestrutura do cluster Kubernetes (EKS) na AWS, gerenciada com Terraform.
 
 ## 📋 Visão Geral
 
@@ -15,43 +15,29 @@ Este projeto provisiona e configura um cluster Amazon EKS (Elastic Kubernetes Se
 
 ## 🏗️ Estrutura do Projeto
 
-O projeto utiliza uma arquitetura modular com um root module orquestrador:
+O projeto está organizado em três módulos principais que devem ser executados em ordem:
 
 ```
-infra-cluster/
-├── main.tf                      # Root module orquestrador
-├── providers.tf                 # Configuração de providers (AWS, K8s, Helm)
-├── backend.tf                   # Backend S3 único
-├── variables.tf                 # Variáveis do root module
-├── outputs.tf                   # Outputs do root module
-├── data.tf                      # Data sources (infra-core remote state)
-├── terraform.tfvars             # Valores das variáveis
+terraform/
+├── cluster/              # Módulo principal - Cria o cluster EKS
+│   ├── modules/
+│   │   └── eks/         # Módulo reutilizável para criação do EKS
+│   ├── main.tf          # Configuração do cluster e security groups
+│   ├── eks-roles.tf     # IAM roles para cluster e nodes
+│   ├── variables.tf     # Variáveis do módulo cluster
+│   └── terraform.tfvars # Valores das variáveis
 │
-├── modules/                     # Módulos reutilizáveis
-│   ├── cluster/                # Módulo do cluster EKS
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   ├── outputs.tf
-│   │   ├── eks-roles.tf
-│   │   ├── data.tf
-│   │   └── modules/
-│   │       └── eks/
-│   │
-│   ├── bootstrap-core/         # IRSA + Addons essenciais
-│   │   ├── variables.tf
-│   │   ├── outputs.tf
-│   │   ├── irsa.tf
-│   │   ├── addons.tf
-│   │   └── data.tf
-│   │
-│   └── bootstrap-addons/       # Addons adicionais (Datadog, etc)
-│       ├── variables.tf
-│       ├── outputs.tf
-│       ├── addons.tf
-│       ├── k8s-manifests.tf
-│       └── data.tf
+├── bootstrap-core/       # Configuração inicial - IRSA e addons essenciais
+│   ├── irsa.tf          # IAM Roles for Service Accounts
+│   ├── addons.tf        # Helm releases dos addons core
+│   ├── variables.tf
+│   └── terraform.tfvars
 │
-└── terraform/                   # Diretório legado (manter para referência)
+└── bootstrap-addons/     # Addons adicionais e configurações
+    ├── addons.tf        # Helm releases dos addons (Datadog)
+    ├── k8s-manifests.tf # Manifestos Kubernetes (External Secrets, LimitRange, ResourceQuota)
+    ├── variables.tf
+    └── terraform.tfvars
 ```
 
 ## 🔧 Pré-requisitos
@@ -64,36 +50,64 @@ Antes de começar, certifique-se de ter:
 - **helm** instalado (opcional, mas recomendado)
 - Acesso a uma conta AWS com permissões adequadas
 - Um bucket S3 configurado para armazenar o estado do Terraform (`nextime-frame-state-bucket`)
-- Uma infraestrutura de rede pré-existente (VPC e subnets) do `infra-core`
+- Uma infraestrutura de rede pré-existente (VPC e subnets) referenciada via remote state
 
 ## 🚀 Como Usar
 
-### Execução Unificada
+### 1. Configurar o Backend do Terraform
 
-Com a nova arquitetura modular, todo o processo é executado em um único comando:
+Todos os módulos utilizam backend S3. Certifique-se de que o bucket `nextime-frame-state-bucket` existe na região `us-east-1`.
+
+### 2. Criar o Cluster EKS
 
 ```bash
-# 1. Na raiz do projeto
-cd infra-cluster
-
-# 2. Inicializar
+cd terraform/cluster
 terraform init
-
-# 3. Validar
-terraform validate
-
-# 4. Planejar
-terraform plan -var-file=terraform.tfvars
-
-# 5. Aplicar (cria cluster + bootstrap-core + bootstrap-addons)
-terraform apply -var-file=terraform.tfvars
+terraform plan
+terraform apply
 ```
 
-### O que acontece durante o apply:
+Este módulo cria:
+- Cluster EKS
+- IAM roles para cluster e nodes
+- Security groups
+- Node group com auto-scaling
 
-1. **Módulo Cluster**: Cria o cluster EKS, roles IAM, security groups e node groups
-2. **Módulo Bootstrap Core**: Configura IRSA e instala addons essenciais (ArgoCD, AWS LB Controller, External Secrets, EBS CSI, Metrics Server)
-3. **Módulo Bootstrap Addons**: Instala Datadog e configura secrets/quotas
+### 3. Configurar Addons Core (IRSA e Addons Essenciais)
+
+```bash
+cd terraform/bootstrap-core
+terraform init
+terraform plan
+terraform apply
+```
+
+Este módulo configura:
+- IRSA (IAM Roles for Service Accounts) para:
+  - External Secrets
+  - AWS Load Balancer Controller
+  - EBS CSI Driver
+- Instala via Helm:
+  - ArgoCD (v7.6.0)
+  - AWS Load Balancer Controller (v1.7.2)
+  - External Secrets Operator (v0.9.20)
+  - AWS EBS CSI Driver
+  - Metrics Server
+
+### 4. Instalar Addons Adicionais
+
+```bash
+cd terraform/bootstrap-addons
+terraform init
+terraform plan
+terraform apply
+```
+
+Este módulo instala:
+- Datadog Agent (monitoramento completo)
+- Configura ClusterSecretStore para AWS SSM Parameter Store
+- Cria ExternalSecret para Datadog API Key
+- Define LimitRange e ResourceQuota para o namespace default
 
 ## 📦 Componentes Instalados
 
@@ -140,53 +154,44 @@ O projeto utiliza IRSA para permitir que pods do Kubernetes assumam roles IAM es
 
 ## 📝 Variáveis Principais
 
-### Root Module (`terraform.tfvars`)
+### Cluster (`terraform/cluster/terraform.tfvars`)
 
 ```hcl
-region      = "us-east-1"
-environment = "dev"
-project     = "nexTime-frame"
-
-cluster_name    = "nextime-frame-cluster"
-cluster_version = "1.29"
-
+region              = "us-east-1"
+environment         = "dev"
+cluster_name        = "nextime-frame-cluster"
+cluster_version     = "1.29"
 node_min_size       = 2
 node_max_size       = 2
 node_desired_size   = 2
 node_instance_types = ["t3.large"]
-
 endpoint_private_access = true
 endpoint_public_access  = true
 public_access_cidrs     = ["0.0.0.0/0"]
+ami_type                = "AL2_x86_64"
+```
 
-ami_type = "AL2_x86_64"
+### Bootstrap Core/Addons
 
-tags = {
-  Environment = "dev"
-  Project     = "nexTime-frame"
-}
+```hcl
+region      = "us-east-1"
+environment = "dev"
+project      = "nexTime-frame"
 ```
 
 ## 🔄 Dependências
 
 O projeto depende de:
 
-1. **Infraestrutura de Rede (infra-core)**: VPC e subnets devem existir e estar referenciadas no remote state:
+1. **Infraestrutura de Rede**: VPC e subnets devem existir e estar referenciadas no remote state:
    - Backend: `s3://nextime-frame-state-bucket/infra-core/infra.tfstate`
    - Outputs esperados:
      - `vpc_id`
      - `public_subnet_ids`
 
-2. **Fluxo de Dependências entre Módulos**:
-   ```
-   infra-core (remote state)
-        ↓
-   module.cluster
-        ↓
-   module.bootstrap_core
-        ↓
-   module.bootstrap_addons
-   ```
+2. **Remote States**: Os módulos utilizam remote states para compartilhar informações:
+   - `bootstrap-core` depende do estado do `cluster`
+   - `bootstrap-addons` depende dos estados do `cluster` e `bootstrap-core`
 
 ## 📊 Recursos de Monitoramento
 
@@ -209,68 +214,40 @@ O External Secrets Operator sincroniza automaticamente este valor para um Secret
 
 Para atualizar a versão do Kubernetes:
 
-1. Atualize `cluster_version` em `terraform.tfvars`
-2. Execute `terraform plan` e `terraform apply`
+1. Atualize `cluster_version` em `terraform/cluster/terraform.tfvars`
+2. Execute `terraform plan` e `terraform apply` no módulo `cluster`
 
 ### Adicionar Novos Addons
 
-1. Adicione o Helm release em `modules/bootstrap-core/addons.tf` ou `modules/bootstrap-addons/addons.tf`
-2. Se necessário, configure IRSA em `modules/bootstrap-core/irsa.tf`
-3. Execute `terraform apply`
+1. Adicione o Helm release em `terraform/bootstrap-core/addons.tf` ou `terraform/bootstrap-addons/addons.tf`
+2. Se necessário, configure IRSA em `terraform/bootstrap-core/irsa.tf`
+3. Execute `terraform apply` no módulo correspondente
 
 ### Escalar Nodes
 
-Atualize as variáveis `node_min_size`, `node_max_size` e `node_desired_size` em `terraform.tfvars` e aplique as mudanças.
+Atualize as variáveis `node_min_size`, `node_max_size` e `node_desired_size` em `terraform/cluster/terraform.tfvars` e aplique as mudanças.
 
 ## 🧹 Limpeza
 
-Para destruir a infraestrutura:
+Para destruir a infraestrutura, execute `terraform destroy` na ordem inversa:
 
 ```bash
-# Na raiz do projeto
-terraform destroy -var-file=terraform.tfvars
+cd terraform/bootstrap-addons
+terraform destroy
+
+cd ../bootstrap-core
+terraform destroy
+
+cd ../cluster
+terraform destroy
 ```
 
 **⚠️ Atenção**: Certifique-se de remover manualmente recursos que possam ter dependências (como volumes EBS persistentes) antes de destruir o cluster.
-
-## 🏛️ Arquitetura Modular
-
-### Vantagens da Nova Estrutura
-
-✅ **Um único `terraform apply`** - tudo é orquestrado pelo root module  
-✅ **Sem remote state entre módulos** - outputs passados via variáveis  
-✅ **Dependências explícitas** - `depends_on` entre módulos  
-✅ **Módulos reutilizáveis** - podem ser usados em outros projetos  
-✅ **Providers centralizados** - configurados uma vez no root  
-✅ **Backend único** - um state file para toda a infraestrutura do cluster  
-✅ **infra-core intacto** - continua separado com seu próprio state  
-
-### Como os Módulos se Comunicam
-
-```terraform
-# Root module (main.tf)
-module "cluster" {
-  source = "./modules/cluster"
-  # ... variáveis
-}
-
-module "bootstrap_core" {
-  source = "./modules/bootstrap-core"
-  depends_on = [module.cluster]
-  
-  # Passa outputs do cluster via variáveis
-  cluster_name              = module.cluster.cluster_name
-  cluster_endpoint          = module.cluster.cluster_endpoint
-  cluster_oidc_provider_arn = module.cluster.cluster_oidc_provider_arn
-  # ...
-}
-```
 
 ## 📚 Referências
 
 - [AWS EKS Documentation](https://docs.aws.amazon.com/eks/)
 - [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
-- [Terraform Modules](https://developer.hashicorp.com/terraform/language/modules)
 - [ArgoCD Documentation](https://argo-cd.readthedocs.io/)
 - [External Secrets Operator](https://external-secrets.io/)
 - [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)
