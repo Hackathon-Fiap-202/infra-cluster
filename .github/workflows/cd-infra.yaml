@@ -15,26 +15,27 @@ env:
   CLUSTER_NAME: nextime-frame-cluster
 
 jobs:
+
   # =============================================================================
-  # FASE 1: Deploy do Cluster (sem bootstrap)
+  # FASE 1 - CLUSTER
   # =============================================================================
   deploy-cluster:
     name: Deploy - Fase 1 (Cluster)
     runs-on: ubuntu-latest
     environment: production
 
-    steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
+    outputs:
+      cluster_applied: ${{ steps.apply_cluster.outcome }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
           terraform_wrapper: false
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
           aws-region: ${{ env.AWS_REGION }}
@@ -42,31 +43,22 @@ jobs:
       - name: Terraform Init
         run: terraform init -upgrade
 
-      - name: Terraform Plan - Fase 1 (Cluster apenas)
-        run: |
-          terraform plan \
-            -var-file=terraform.tfvars \
-            -var="enable_bootstrap_addons=false" \
-            -out=tfplan-fase1
-
-      - name: Terraform Apply - Fase 1 (Cluster)
+      - name: Terraform Apply - Fase 1
         id: apply_cluster
         run: |
-          terraform apply -auto-approve tfplan-fase1
-          echo "cluster_created=true" >> $GITHUB_OUTPUT
+          terraform apply \
+            -auto-approve \
+            -var-file=terraform.tfvars \
+            -var="enable_bootstrap_addons=false"
 
-      - name: Verificar Cluster Criado
-        if: steps.apply_cluster.outputs.cluster_created == 'true'
+      - name: Summary Fase 1
         run: |
           echo "## ✅ Fase 1 Concluída" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Cluster EKS criado com sucesso!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Cluster**: ${{ env.CLUSTER_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Região**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "Cluster base validado/criado." >> $GITHUB_STEP_SUMMARY
+
 
   # =============================================================================
-  # FASE 2: Deploy do Bootstrap (addons)
+  # FASE 2 - BOOTSTRAP
   # =============================================================================
   deploy-bootstrap:
     name: Deploy - Fase 2 (Bootstrap)
@@ -75,86 +67,30 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
           terraform_wrapper: false
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Configure kubectl
-        run: |
-          aws eks update-kubeconfig \
-            --name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }}
-
-      - name: Aguardar cluster ficar pronto
-        run: |
-          echo "Aguardando nodes ficarem prontos..."
-          kubectl wait --for=condition=Ready nodes --all --timeout=600s || true
-
       - name: Terraform Init
         run: terraform init -upgrade
 
-      - name: Terraform Plan - Fase 2 (Com Bootstrap)
+      - name: Terraform Apply - Fase 2
         run: |
-          terraform plan \
+          terraform apply \
+            -auto-approve \
             -var-file=terraform.tfvars \
-            -var="enable_bootstrap_addons=true" \
-            -out=tfplan-fase2
+            -var="enable_bootstrap_addons=true"
 
-      - name: Terraform Apply - Fase 2 (Bootstrap)
-        id: apply_bootstrap
+      - name: Summary Final
         run: |
-          terraform apply -auto-approve tfplan-fase2
-          echo "bootstrap_created=true" >> $GITHUB_OUTPUT
-
-      - name: Verificar estado do cluster
-        if: steps.apply_bootstrap.outputs.bootstrap_created == 'true'
-        run: |
-          echo "## 🎯 Verificação do Cluster" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### Nodes" >> $GITHUB_STEP_SUMMARY
-          kubectl get nodes >> $GITHUB_STEP_SUMMARY || echo "Erro ao obter nodes" >> $GITHUB_STEP_SUMMARY
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Pods (todos os namespaces)" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -A >> $GITHUB_STEP_SUMMARY || echo "Erro ao obter pods" >> $GITHUB_STEP_SUMMARY
-
-      - name: Verificar Addons Core
-        if: steps.apply_bootstrap.outputs.bootstrap_created == 'true'
-        run: |
-          echo "## 📦 Addons Core" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### ArgoCD" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n argocd >> $GITHUB_STEP_SUMMARY || echo "ArgoCD não encontrado" >> $GITHUB_STEP_SUMMARY
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### External Secrets" >> $GITHUB_STEP_SUMMARY
-          kubectl get pods -n external-secrets >> $GITHUB_STEP_SUMMARY || echo "External Secrets não encontrado" >> $GITHUB_STEP_SUMMARY
-
-      - name: Deploy Summary
-        if: steps.apply_bootstrap.outputs.bootstrap_created == 'true'
-        run: |
-          echo "## 🎉 Deploy Completo Concluído!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Fase 1**: Cluster EKS criado" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Fase 2**: Bootstrap addons instalados" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📦 **Módulos implantados**:" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ module.cluster - EKS Cluster" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ module.bootstrap_core - IRSA + Addons Core" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ module.bootstrap_addons - Datadog + Secrets" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎉 Deploy Completo" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Cluster EKS validado" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Bootstrap aplicado" >> $GITHUB_STEP_SUMMARY
