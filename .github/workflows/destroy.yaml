@@ -1,0 +1,138 @@
+name: Destroy Infra AWS (Unified Root Module)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Digite DESTROY para confirmar a destruição completa'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  CLUSTER_NAME: nextime-frame-cluster
+
+jobs:
+  terraform-destroy:
+    name: Destroy - Infraestrutura Completa
+    runs-on: ubuntu-latest
+    environment: production
+    if: github.event.inputs.confirm == 'DESTROY'
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+          terraform_wrapper: false
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl (para limpeza de recursos K8s se necessário)
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }} || echo "Cluster pode já estar destruído"
+        continue-on-error: true
+
+      - name: Limpar recursos Kubernetes (opcional)
+        run: |
+          # Remover finalizers que podem travar a destruição
+          kubectl get namespace argocd -o json 2>/dev/null | \
+            jq '.spec.finalizers = []' | \
+            kubectl replace --raw "/api/v1/namespaces/argocd/finalize" -f - || true
+          
+          kubectl get namespace external-secrets -o json 2>/dev/null | \
+            jq '.spec.finalizers = []' | \
+            kubectl replace --raw "/api/v1/namespaces/external-secrets/finalize" -f - || true
+        continue-on-error: true
+
+      - name: Terraform Init
+        run: terraform init -upgrade
+
+      - name: Terraform Plan Destroy
+        run: terraform plan -destroy -var-file=terraform.tfvars -out=tfplan-destroy
+
+      - name: Confirmar destruição
+        run: |
+          echo "## ⚠️ ATENÇÃO: Destruição de Infraestrutura" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Os seguintes recursos serão DESTRUÍDOS:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🗑️ **Cluster EKS**: ${{ env.CLUSTER_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "🗑️ **Todos os addons** (ArgoCD, External Secrets, etc)" >> $GITHUB_STEP_SUMMARY
+          echo "🗑️ **Datadog e configurações**" >> $GITHUB_STEP_SUMMARY
+          echo "🗑️ **IAM Roles IRSA**" >> $GITHUB_STEP_SUMMARY
+          echo "🗑️ **Security Groups**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **ESTA AÇÃO É IRREVERSÍVEL!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Aguardando 10 segundos antes de continuar..." >> $GITHUB_STEP_SUMMARY
+          sleep 10
+
+      - name: Terraform Destroy
+        id: destroy
+        run: |
+          terraform destroy -auto-approve -var-file=terraform.tfvars
+          echo "destroy_success=true" >> $GITHUB_OUTPUT
+
+      - name: Verificar recursos remanescentes
+        if: steps.destroy.outputs.destroy_success == 'true'
+        run: |
+          echo "## 🔍 Verificação Pós-Destruição" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Verificar se cluster foi removido
+          if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            echo "⚠️ **Cluster ainda existe!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Cluster removido com sucesso**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Listar security groups órfãos (opcional)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security Groups Remanescentes" >> $GITHUB_STEP_SUMMARY
+          aws ec2 describe-security-groups \
+            --filters "Name=tag:Name,Values=*nextime-frame-cluster*" \
+            --query 'SecurityGroups[*].[GroupId,GroupName]' \
+            --output table >> $GITHUB_STEP_SUMMARY || echo "Nenhum security group encontrado" >> $GITHUB_STEP_SUMMARY
+
+      - name: Destroy Summary
+        if: steps.destroy.outputs.destroy_success == 'true'
+        run: |
+          echo "## ✅ Destruição Concluída" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Todos os recursos foram removidos:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ module.bootstrap_addons (destruído primeiro)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ module.bootstrap_core (destruído em segundo)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ module.cluster (destruído por último)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🗑️ **State preservado em**: s3://nextime-frame-state-bucket/infra-kubernetes/infra.tfstate" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notificar falha
+        if: failure()
+        run: |
+          echo "## ❌ Destruição Falhou" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ Alguns recursos podem não ter sido removidos." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Ações recomendadas**:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Verificar recursos órfãos no console AWS" >> $GITHUB_STEP_SUMMARY
+          echo "2. Remover manualmente se necessário" >> $GITHUB_STEP_SUMMARY
+          echo "3. Tentar executar destroy novamente" >> $GITHUB_STEP_SUMMARY
