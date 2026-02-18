@@ -1,0 +1,96 @@
+name: Deploy Infra AWS (Unified Root Module - 2 Fases)
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  CLUSTER_NAME: nextime-frame-cluster
+
+jobs:
+
+  # =============================================================================
+  # FASE 1 - CLUSTER
+  # =============================================================================
+  deploy-cluster:
+    name: Deploy - Fase 1 (Cluster)
+    runs-on: ubuntu-latest
+    environment: production
+
+    outputs:
+      cluster_applied: ${{ steps.apply_cluster.outcome }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init -upgrade
+
+      - name: Terraform Apply - Fase 1
+        id: apply_cluster
+        run: |
+          terraform apply \
+            -auto-approve \
+            -var-file=terraform.tfvars \
+            -var="enable_bootstrap_addons=false"
+
+      - name: Summary Fase 1
+        run: |
+          echo "## ✅ Fase 1 Concluída" >> $GITHUB_STEP_SUMMARY
+          echo "Cluster base validado/criado." >> $GITHUB_STEP_SUMMARY
+
+
+  # =============================================================================
+  # FASE 2 - BOOTSTRAP
+  # =============================================================================
+  deploy-bootstrap:
+    name: Deploy - Fase 2 (Bootstrap)
+    runs-on: ubuntu-latest
+    needs: deploy-cluster
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-action-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init -upgrade
+
+      - name: Terraform Apply - Fase 2
+        run: |
+          terraform apply \
+            -auto-approve \
+            -var-file=terraform.tfvars \
+            -var="enable_bootstrap_addons=true"
+
+      - name: Summary Final
+        run: |
+          echo "## 🎉 Deploy Completo" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Cluster EKS validado" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Bootstrap aplicado" >> $GITHUB_STEP_SUMMARY
