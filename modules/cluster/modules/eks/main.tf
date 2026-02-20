@@ -40,6 +40,13 @@ resource "aws_eks_node_group" "default" {
 
   instance_types = var.node_instance_types
 
+  # ✅ CORREÇÃO: Usa Launch Template com Security Group customizado
+  # Isso FORÇA o uso do SG que você criou em vez dos SGs automáticos do EKS
+  launch_template {
+    id      = aws_launch_template.eks_nodes.id
+    version = "$Latest"
+  }
+
   tags = merge(
     {
       Name        = "${var.cluster_name}-node"
