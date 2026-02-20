@@ -31,21 +31,6 @@ resource "aws_security_group" "eks_cluster_sg" {
   description = "EKS Cluster Security Group"
   vpc_id      = var.vpc_id
 
-  ingress {
-    description     = "Allow nodes to communicate with cluster API"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.eks_nodes_sg.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   tags = merge(
     {
       Name = "${var.cluster_name}-cluster-sg"
@@ -54,25 +39,52 @@ resource "aws_security_group" "eks_cluster_sg" {
   )
 }
 
+# Regras de ingress para o Cluster SG
+resource "aws_security_group_rule" "cluster_ingress_nodes_https" {
+  description              = "Allow nodes to communicate with cluster API"
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_nodes_sg.id
+  security_group_id        = aws_security_group.eks_cluster_sg.id
+}
+
+# Regras de egress para o Cluster SG
+resource "aws_security_group_rule" "cluster_egress_nodes" {
+  description              = "Allow cluster to communicate with nodes"
+  type                     = "egress"
+  from_port                = 1025
+  to_port                  = 65535
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_nodes_sg.id
+  security_group_id        = aws_security_group.eks_cluster_sg.id
+}
+
+resource "aws_security_group_rule" "cluster_egress_nodes_kubelet" {
+  description              = "Allow cluster to communicate with kubelet on nodes"
+  type                     = "egress"
+  from_port                = 10250
+  to_port                  = 10250
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_nodes_sg.id
+  security_group_id        = aws_security_group.eks_cluster_sg.id
+}
+
+resource "aws_security_group_rule" "cluster_egress_internet" {
+  description       = "Allow cluster to communicate with internet"
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.eks_cluster_sg.id
+}
+
 resource "aws_security_group" "eks_nodes_sg" {
   name        = "${var.cluster_name}-nodes-sg"
   description = "EKS Worker Nodes Security Group"
   vpc_id      = var.vpc_id
-
-  ingress {
-    description = "Node to node communication"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    self        = true
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   tags = merge(
     {
@@ -80,5 +92,57 @@ resource "aws_security_group" "eks_nodes_sg" {
     },
     var.tags
   )
+}
+
+# Regras de ingress para o Node SG
+resource "aws_security_group_rule" "nodes_ingress_self" {
+  description       = "Allow nodes to communicate with each other"
+  type              = "ingress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  self              = true
+  security_group_id = aws_security_group.eks_nodes_sg.id
+}
+
+resource "aws_security_group_rule" "nodes_ingress_cluster" {
+  description              = "Allow cluster to communicate with nodes"
+  type                     = "ingress"
+  from_port                = 1025
+  to_port                  = 65535
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_cluster_sg.id
+  security_group_id        = aws_security_group.eks_nodes_sg.id
+}
+
+resource "aws_security_group_rule" "nodes_ingress_cluster_kubelet" {
+  description              = "Allow cluster to communicate with kubelet on nodes"
+  type                     = "ingress"
+  from_port                = 10250
+  to_port                  = 10250
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_cluster_sg.id
+  security_group_id        = aws_security_group.eks_nodes_sg.id
+}
+
+resource "aws_security_group_rule" "nodes_ingress_cluster_https" {
+  description              = "Allow nodes to receive HTTPS traffic from cluster"
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.eks_cluster_sg.id
+  security_group_id        = aws_security_group.eks_nodes_sg.id
+}
+
+# Regras de egress para o Node SG
+resource "aws_security_group_rule" "nodes_egress_internet" {
+  description       = "Allow nodes to communicate with internet"
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.eks_nodes_sg.id
 }
 
