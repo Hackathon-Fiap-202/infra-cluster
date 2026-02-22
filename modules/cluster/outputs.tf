@@ -17,3 +17,8 @@ output "cluster_oidc_provider_url" {
 output "cluster_ca" {
   value = module.eks.cluster_certificate_authority_data
 }
+
+output "cluster_security_group_id" {
+  description = "Cluster Security Group gerenciado pelo EKS"
+  value       = module.eks.cluster_security_group_id
+}
