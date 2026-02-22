@@ -45,10 +45,6 @@ resource "aws_eks_node_group" "default" {
     version = "$Latest"
   }
 
-  remote_access {
-    source_security_group_ids = [var.node_security_group_id]
-  }
-
   tags = merge(
     {
       Name        = "${var.cluster_name}-node"
