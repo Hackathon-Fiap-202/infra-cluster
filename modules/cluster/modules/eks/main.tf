@@ -40,11 +40,6 @@ resource "aws_eks_node_group" "default" {
 
   instance_types = var.node_instance_types
 
-  launch_template {
-    id      = aws_launch_template.eks_nodes.id
-    version = "$Latest"
-  }
-
   tags = merge(
     {
       Name        = "${var.cluster_name}-node"
